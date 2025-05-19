@@ -1,3 +1,10 @@
+#include "SDL3/SDL.h"
+#include <SDL3/SDL_events.h>
+#include <SDL3/SDL_init.h>
+#include <SDL3/SDL_log.h>
+#include <SDL3/SDL_oldnames.h>
+#include <SDL3/SDL_render.h>
+#include <SDL3/SDL_video.h>
 #include <algorithm>
 #include <array>
 #include <chrono>
@@ -388,8 +395,31 @@ int main(int argc, char *argv[]) {
   Chip8 chip{};
   chip.load_rom(rom);
 
+  SDL_Window *window;
+  SDL_Renderer *renderer;
+  SDL_Surface *surface;
+  SDL_Event event;
+
+  if (!SDL_Init(SDL_INIT_VIDEO)) {
+    SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Couldn't initialize SDL: %s",
+                 SDL_GetError());
+    return 3;
+  }
+
+  if (!SDL_CreateWindowAndRenderer("chip8", 800, 600, SDL_WINDOW_RESIZABLE,
+                                  &window, &renderer)) {
+    SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                 "Couldn't create window and renderer: %s", SDL_GetError());
+    return 3;
+  }
+
   uint frame = 0;
   while (true) {
+    SDL_PollEvent(&event);
+    if (event.type == SDL_EVENT_QUIT) {
+      break;
+    }
+
     auto r = chip.run_cycle();
 
     if (!r) {
@@ -400,14 +430,20 @@ int main(int argc, char *argv[]) {
     if (*r)
       break;
 
-    if (frame % 1 == 0) {
-      system("clear");
-      chip.print_screen();
-    }
+    system("clear");
+    chip.print_screen();
+    SDL_SetRenderDrawColor(renderer, 0x00, 0x00, 0x00, 0x00);
+    SDL_RenderClear(renderer);
+    SDL_RenderPresent(renderer);
 
     usleep(1600);
     frame += 1;
   }
+
+  SDL_DestroyRenderer(renderer);
+  SDL_DestroyWindow(window);
+
+  SDL_Quit();
 
   return 0;
 }
