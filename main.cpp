@@ -1,13 +1,17 @@
 #include "SDL3/SDL.h"
+#include <SDL3/SDL_audio.h>
 #include <SDL3/SDL_events.h>
 #include <SDL3/SDL_init.h>
 #include <SDL3/SDL_log.h>
 #include <SDL3/SDL_oldnames.h>
+#include <SDL3/SDL_rect.h>
 #include <SDL3/SDL_render.h>
+#include <SDL3/SDL_scancode.h>
 #include <SDL3/SDL_video.h>
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
@@ -78,6 +82,8 @@ struct Chip8 {
   u_int8_t regs[16];
   u_int16_t reg_i;
 
+  bool inputs[16];
+
   u_int16_t pc;
   std::vector<u_int16_t> last_inst;
   std::vector<u_int16_t> stack;
@@ -91,6 +97,10 @@ struct Chip8 {
 
   Chip8() {
     memory = std::vector<u_int8_t>(4096);
+
+    for (int i = 0; i < 16; i++) {
+      inputs[i] = 0;
+    }
 
     // Copy the font to memory.
     std::copy(CHIP_FONT.begin(), CHIP_FONT.end(),
@@ -122,11 +132,25 @@ struct Chip8 {
     std::cout << "\n";
   }
 
+  void draw_screen(SDL_Renderer *renderer) {
+    SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
+    for (int i = 0; i < SCREEN_WIDTH * SCREEN_HEIGHT; i++) {
+      int x = i % SCREEN_WIDTH, y = i / SCREEN_WIDTH;
+      if (screen[i])
+        SDL_RenderPoint(renderer, x, y);
+    }
+  }
+
   std::expected<bool, ChipError> run_cycle() {
     if (pc >= memory.size())
       return std::unexpected(PcOutOfBounds{});
 
     u_int16_t inst = ((u_int16_t)memory[pc] << 8) | memory[pc + 1];
+    /* std::cout << std::hex << inst << "\n"; */
+    /* for (uint i = 0; i < 16; i++) { */
+    /*   std::cout << i << " - " << inputs[i] << "|"; */
+    /* } */
+    /* std::cout << "\n"; */
 
     // Store the last 15 instructions for debug reasons.
     last_inst.push_back(inst);
@@ -301,14 +325,38 @@ struct Chip8 {
       break;
     }
 
-      /* case 0xE000: {} Input*/
+    case 0xE000: {
+      u_int8_t vx = regs[(inst & 0x0F00) >> 8];
+      if ((inst & 0x00FF) == 0x009E && inputs[vx]) {
+        advance();
+      }
+
+      if ((inst & 0x00FF) == 0x00A1 && !inputs[vx]) {
+        advance();
+      }
+      break;
+    }
 
     case 0xF000: {
       u_int8_t &vx = regs[(inst & 0x0F00) >> 8];
       if ((inst & 0x00FF) == 0x0007)
         vx = delay_timer;
 
-      /* if ((inst & 0x0FF) == 0x000A) Input */
+      if ((inst & 0x0FF) == 0x000A) {
+        bool any_pressed = false;
+
+        for (uint i = 0; i <= 16; i++) {
+          if (inputs[i]) {
+            vx = i;
+            any_pressed = true;
+            break;
+          }
+        }
+
+        if (!any_pressed) {
+          pc -= 2;
+        }
+      }
 
       if ((inst & 0x00FF) == 0x0015)
         delay_timer = vx;
@@ -400,22 +448,122 @@ int main(int argc, char *argv[]) {
   SDL_Surface *surface;
   SDL_Event event;
 
-  if (!SDL_Init(SDL_INIT_VIDEO)) {
+  if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS | SDL_INIT_AUDIO)) {
     SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Couldn't initialize SDL: %s",
                  SDL_GetError());
     return 3;
   }
 
   if (!SDL_CreateWindowAndRenderer("chip8", 800, 600, SDL_WINDOW_RESIZABLE,
-                                  &window, &renderer)) {
+                                   &window, &renderer)) {
     SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
                  "Couldn't create window and renderer: %s", SDL_GetError());
     return 3;
   }
 
+  /* SDL_SetRenderVSync(renderer, 1); */
+
+  SDL_SetRenderLogicalPresentation(
+      renderer, SCREEN_WIDTH, SCREEN_HEIGHT,
+      SDL_RendererLogicalPresentation::SDL_LOGICAL_PRESENTATION_INTEGER_SCALE);
+
+  SDL_AudioSpec spec = {
+      .format = SDL_AUDIO_F32,
+      .channels = 1,
+      .freq = 44100,
+  };
+
+  SDL_AudioStream *audio = SDL_OpenAudioDeviceStream(
+      SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &spec, nullptr, nullptr);
+
+  int num_samples = spec.freq * 0.2f;
+  std::vector<float> audio_buffer(num_samples);
+  for (int i = 0; i < num_samples; i++) {
+    float t = (float)i / spec.freq;
+    audio_buffer[i] = 0.5f * std::sin(1.0f * M_PI * 440.0f * t);
+  }
+
+  bool playing_sound = false;
   uint frame = 0;
   while (true) {
     SDL_PollEvent(&event);
+
+    switch (event.type) {
+    case SDL_EVENT_QUIT:
+      return 0;
+    case SDL_EVENT_KEY_DOWN:
+      if (event.key.scancode == SDL_SCANCODE_X)
+        chip.inputs[0x0] = true;
+      if (event.key.scancode == SDL_SCANCODE_1)
+        chip.inputs[0x1] = true;
+      if (event.key.scancode == SDL_SCANCODE_2)
+        chip.inputs[0x2] = true;
+      if (event.key.scancode == SDL_SCANCODE_3)
+        chip.inputs[0x3] = true;
+      if (event.key.scancode == SDL_SCANCODE_Q)
+        chip.inputs[0x4] = true;
+      if (event.key.scancode == SDL_SCANCODE_W)
+        chip.inputs[0x5] = true;
+      if (event.key.scancode == SDL_SCANCODE_E)
+        chip.inputs[0x6] = true;
+      if (event.key.scancode == SDL_SCANCODE_A)
+        chip.inputs[0x7] = true;
+      if (event.key.scancode == SDL_SCANCODE_S)
+        chip.inputs[0x8] = true;
+      if (event.key.scancode == SDL_SCANCODE_D)
+        chip.inputs[0x9] = true;
+      if (event.key.scancode == SDL_SCANCODE_Z)
+        chip.inputs[0xA] = true;
+      if (event.key.scancode == SDL_SCANCODE_C)
+        chip.inputs[0xB] = true;
+      if (event.key.scancode == SDL_SCANCODE_4)
+        chip.inputs[0xC] = true;
+      if (event.key.scancode == SDL_SCANCODE_R)
+        chip.inputs[0xD] = true;
+      if (event.key.scancode == SDL_SCANCODE_F)
+        chip.inputs[0xE] = true;
+      if (event.key.scancode == SDL_SCANCODE_V)
+        chip.inputs[0xF] = true;
+      break;
+
+    case SDL_EVENT_KEY_UP:
+      if (event.key.scancode == SDL_SCANCODE_X)
+        chip.inputs[0x0] = false;
+      if (event.key.scancode == SDL_SCANCODE_1)
+        chip.inputs[0x1] = false;
+      if (event.key.scancode == SDL_SCANCODE_2)
+        chip.inputs[0x2] = false;
+      if (event.key.scancode == SDL_SCANCODE_3)
+        chip.inputs[0x3] = false;
+      if (event.key.scancode == SDL_SCANCODE_Q)
+        chip.inputs[0x4] = false;
+      if (event.key.scancode == SDL_SCANCODE_W)
+        chip.inputs[0x5] = false;
+      if (event.key.scancode == SDL_SCANCODE_E)
+        chip.inputs[0x6] = false;
+      if (event.key.scancode == SDL_SCANCODE_A)
+        chip.inputs[0x7] = false;
+      if (event.key.scancode == SDL_SCANCODE_S)
+        chip.inputs[0x8] = false;
+      if (event.key.scancode == SDL_SCANCODE_D)
+        chip.inputs[0x9] = false;
+      if (event.key.scancode == SDL_SCANCODE_Z)
+        chip.inputs[0xA] = false;
+      if (event.key.scancode == SDL_SCANCODE_C)
+        chip.inputs[0xB] = false;
+      if (event.key.scancode == SDL_SCANCODE_4)
+        chip.inputs[0xC] = false;
+      if (event.key.scancode == SDL_SCANCODE_R)
+        chip.inputs[0xD] = false;
+      if (event.key.scancode == SDL_SCANCODE_F)
+        chip.inputs[0xE] = false;
+      if (event.key.scancode == SDL_SCANCODE_V)
+        chip.inputs[0xF] = false;
+      break;
+
+    default:
+      break;
+    }
     if (event.type == SDL_EVENT_QUIT) {
       break;
     }
@@ -430,13 +578,42 @@ int main(int argc, char *argv[]) {
     if (*r)
       break;
 
-    system("clear");
-    chip.print_screen();
+    if (chip.delay_timer > 0) {
+      chip.delay_timer -= 1;
+    }
+
+    if (chip.sound_timer > 0) {
+      if (!playing_sound) {
+        SDL_ResumeAudioStreamDevice(audio);
+        playing_sound = true;
+      }
+
+      chip.delay_timer -= 1;
+
+      if (SDL_GetAudioStreamQueued(audio) < spec.freq * sizeof(float) / 10) {
+        SDL_PutAudioStreamData(audio, audio_buffer.data(),
+                               audio_buffer.size() * sizeof(float));
+      }
+
+    } else {
+      if (playing_sound) {
+        SDL_PauseAudioStreamDevice(audio);
+        SDL_ClearAudioStream(audio);
+        playing_sound = false;
+      }
+    }
+
+    /* system("clear"); */
+    /* chip.print_screen(); */
+
     SDL_SetRenderDrawColor(renderer, 0x00, 0x00, 0x00, 0x00);
     SDL_RenderClear(renderer);
+
+    chip.draw_screen(renderer);
+
     SDL_RenderPresent(renderer);
 
-    usleep(1600);
+    /* usleep(1600); */
     frame += 1;
   }
 
