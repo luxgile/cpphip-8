@@ -1,4 +1,7 @@
 #include "SDL3/SDL.h"
+#include "imgui.h"
+#include "imgui_impl_sdl3.h"
+#include "imgui_impl_sdlrenderer3.h"
 #include <SDL3/SDL_audio.h>
 #include <SDL3/SDL_events.h>
 #include <SDL3/SDL_init.h>
@@ -411,7 +414,7 @@ struct Chip8 {
     for (bool &px : screen) {
       px = false;
     }
-    std::cout << "screen cleared." << "\n";
+    /* std::cout << "screen cleared." << "\n"; */
   }
 };
 
@@ -461,11 +464,12 @@ int main(int argc, char *argv[]) {
     return 3;
   }
 
+
   /* SDL_SetRenderVSync(renderer, 1); */
 
-  SDL_SetRenderLogicalPresentation(
-      renderer, SCREEN_WIDTH, SCREEN_HEIGHT,
-      SDL_RendererLogicalPresentation::SDL_LOGICAL_PRESENTATION_INTEGER_SCALE);
+  /* SDL_SetRenderLogicalPresentation( */
+  /*     renderer, SCREEN_WIDTH, SCREEN_HEIGHT, */
+  /*     SDL_RendererLogicalPresentation::SDL_LOGICAL_PRESENTATION_INTEGER_SCALE); */
 
   SDL_AudioSpec spec = {
       .format = SDL_AUDIO_F32,
@@ -483,10 +487,18 @@ int main(int argc, char *argv[]) {
     audio_buffer[i] = 0.5f * std::sin(1.0f * M_PI * 440.0f * t);
   }
 
+  IMGUI_CHECKVERSION();
+  ImGui::CreateContext();
+
+  ImGui_ImplSDL3_InitForSDLRenderer(window, renderer);
+  ImGui_ImplSDLRenderer3_Init(renderer);
+
   bool playing_sound = false;
   uint frame = 0;
   while (true) {
     SDL_PollEvent(&event);
+    
+    ImGui_ImplSDL3_ProcessEvent(&event);
 
     switch (event.type) {
     case SDL_EVENT_QUIT:
@@ -610,6 +622,15 @@ int main(int argc, char *argv[]) {
     SDL_RenderClear(renderer);
 
     chip.draw_screen(renderer);
+
+    ImGui_ImplSDL3_NewFrame();
+    ImGui_ImplSDLRenderer3_NewFrame();
+    ImGui::NewFrame();
+
+    ImGui::ShowDemoWindow();
+    ImGui::Render();
+
+    ImGui_ImplSDLRenderer3_RenderDrawData(ImGui::GetDrawData(), renderer);
 
     SDL_RenderPresent(renderer);
 

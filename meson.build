@@ -4,9 +4,10 @@ project('cpphip8', 'cpp',
                      'cpp_std=c++23'])
 
 sdl3 = dependency('sdl3')
+imgui = dependency('imgui')
 
 exe = executable('cpphip8', 'main.cpp',
   install : true,
-  dependencies: sdl3)
+  dependencies: [ sdl3, imgui ])
 
 test('basic', exe)
