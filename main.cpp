@@ -10,6 +10,8 @@
 #include <SDL3/SDL_rect.h>
 #include <SDL3/SDL_render.h>
 #include <SDL3/SDL_scancode.h>
+#include <SDL3/SDL_stdinc.h>
+#include <SDL3/SDL_timer.h>
 #include <SDL3/SDL_video.h>
 #include <algorithm>
 #include <array>
@@ -433,6 +435,7 @@ void handle_chip_error(ChipError &error) {
 #define ROM_PATH "roms/"
 std::vector<std::string> roms{};
 bool rom_loaded = false;
+int cycles_per_second = 60;
 void draw_emulator_ui(Chip8 &chip) {
   ImGui::Begin("Chip 8");
 
@@ -458,6 +461,8 @@ void draw_emulator_ui(Chip8 &chip) {
     chip.load_rom(rom);
     rom_loaded = true;
   }
+
+  ImGui::InputInt("Cycles per second", &cycles_per_second);
 
   ImGui::End();
 }
@@ -520,9 +525,21 @@ int main(int argc, char *argv[]) {
   ImGui_ImplSDL3_InitForSDLRenderer(window, renderer);
   ImGui_ImplSDLRenderer3_Init(renderer);
 
+  Uint64 logic_timer = 0;
+  Uint64 chip_timers_timer = 0;
+
   bool playing_sound = false;
   uint frame = 0;
+  Uint64 last_frame_time = SDL_GetTicks();
+  Uint64 dt;
   while (true) {
+    Uint64 frame_time = SDL_GetTicks();
+    dt = frame_time - last_frame_time;
+    last_frame_time = frame_time;
+
+    logic_timer += dt;
+    chip_timers_timer += dt;
+
     SDL_PollEvent(&event);
 
     ImGui_ImplSDL3_ProcessEvent(&event);
@@ -603,11 +620,13 @@ int main(int argc, char *argv[]) {
     default:
       break;
     }
+
     if (event.type == SDL_EVENT_QUIT) {
       break;
     }
 
-    if (rom_loaded) {
+    const Uint32 fixed_logic_update_ms = 1000 / cycles_per_second;
+    while (rom_loaded && logic_timer >= fixed_logic_update_ms) {
       auto r = chip.run_cycle();
 
       if (!r) {
@@ -617,6 +636,12 @@ int main(int argc, char *argv[]) {
 
       /* if (*r) */
       /*   break; */
+
+      logic_timer -= fixed_logic_update_ms;
+    }
+
+    const Uint64 fixed_chip_timer_update_ms = 1000 / 60;
+    while (rom_loaded && chip_timers_timer >= fixed_chip_timer_update_ms) {
 
       if (chip.delay_timer > 0) {
         chip.delay_timer -= 1;
@@ -642,6 +667,8 @@ int main(int argc, char *argv[]) {
           playing_sound = false;
         }
       }
+
+      chip_timers_timer -= fixed_chip_timer_update_ms;
     }
 
     SDL_SetRenderDrawColor(renderer, 0x00, 0x00, 0x00, 0x00);
@@ -660,8 +687,6 @@ int main(int argc, char *argv[]) {
     ImGui_ImplSDLRenderer3_RenderDrawData(ImGui::GetDrawData(), renderer);
 
     SDL_RenderPresent(renderer);
-
-    /* usleep(1600); */
     frame += 1;
   }
 
