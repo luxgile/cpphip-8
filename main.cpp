@@ -7,14 +7,17 @@
 #include <SDL3/SDL_init.h>
 #include <SDL3/SDL_log.h>
 #include <SDL3/SDL_oldnames.h>
+#include <SDL3/SDL_pixels.h>
 #include <SDL3/SDL_rect.h>
 #include <SDL3/SDL_render.h>
 #include <SDL3/SDL_scancode.h>
 #include <SDL3/SDL_stdinc.h>
+#include <SDL3/SDL_surface.h>
 #include <SDL3/SDL_timer.h>
 #include <SDL3/SDL_video.h>
 #include <algorithm>
 #include <array>
+#include <charconv>
 #include <chrono>
 #include <cmath>
 #include <cstddef>
@@ -116,6 +119,8 @@ struct Chip8 {
   void advance() { pc += 2; }
 
   void load_rom(Rom &rom) {
+    clear_screen();
+
     std::copy(rom.data.begin(), rom.data.end(),
               memory.begin() + CHIP_ROM_ADDRESS);
     pc = CHIP_ROM_ADDRESS;
@@ -464,6 +469,8 @@ void draw_emulator_ui(Chip8 &chip) {
 
   ImGui::InputInt("Cycles per second", &cycles_per_second);
 
+  ImGui::LabelText("Audio", "%s", std::to_string(chip.sound_timer).c_str());
+
   ImGui::End();
 }
 
@@ -524,6 +531,11 @@ int main(int argc, char *argv[]) {
 
   ImGui_ImplSDL3_InitForSDLRenderer(window, renderer);
   ImGui_ImplSDLRenderer3_Init(renderer);
+
+  SDL_Texture *chip_screen_texture =
+      SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBA8888,
+                        SDL_TEXTUREACCESS_TARGET, SCREEN_WIDTH, SCREEN_HEIGHT);
+  SDL_SetTextureScaleMode(chip_screen_texture, SDL_SCALEMODE_NEAREST);
 
   Uint64 logic_timer = 0;
   Uint64 chip_timers_timer = 0;
@@ -653,7 +665,7 @@ int main(int argc, char *argv[]) {
           playing_sound = true;
         }
 
-        chip.delay_timer -= 1;
+        chip.sound_timer -= 1;
 
         if (SDL_GetAudioStreamQueued(audio) < spec.freq * sizeof(float) / 10) {
           SDL_PutAudioStreamData(audio, audio_buffer.data(),
@@ -674,7 +686,15 @@ int main(int argc, char *argv[]) {
     SDL_SetRenderDrawColor(renderer, 0x00, 0x00, 0x00, 0x00);
     SDL_RenderClear(renderer);
 
+    SDL_SetRenderTarget(renderer, chip_screen_texture);
+    SDL_SetRenderDrawColor(renderer, 0x00, 0x00, 0x00, 0x00);
+    SDL_RenderClear(renderer);
+
     chip.draw_screen(renderer);
+
+    SDL_SetRenderTarget(renderer, NULL);
+
+    SDL_RenderTexture(renderer, chip_screen_texture, NULL, NULL);
 
     ImGui_ImplSDL3_NewFrame();
     ImGui_ImplSDLRenderer3_NewFrame();
