@@ -21,6 +21,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <expected>
+#include <filesystem>
 #include <fstream>
 #include <ios>
 #include <iostream>
@@ -429,22 +430,48 @@ void handle_chip_error(ChipError &error) {
   }
 }
 
+#define ROM_PATH "roms/"
+std::vector<std::string> roms{};
+bool rom_loaded = false;
+void draw_emulator_ui(Chip8 &chip) {
+  ImGui::Begin("Chip 8");
+
+  static int selected_rom = 0;
+  ImGui::Combo(
+      "Roms", &selected_rom,
+      [](void *data, int idx, const char **out_text) {
+        auto ptr_roms = (const std::vector<std::string> *)data;
+        *out_text = ptr_roms->at(idx).c_str();
+        return true;
+      },
+      (void *)&roms, roms.size());
+
+  if (ImGui::Button("Load Rom")) {
+    std::string rom_path = std::string(ROM_PATH) + roms[selected_rom];
+    std::ifstream rom_file(rom_path, std::ios::binary | std::ios::in);
+
+    if (!rom_file.is_open()) {
+      std::printf("no rom found. \n");
+    }
+
+    auto rom = Rom::from_file(rom_file).value();
+    chip.load_rom(rom);
+    rom_loaded = true;
+  }
+
+  ImGui::End();
+}
+
 int main(int argc, char *argv[]) {
-  if (argc < 2) {
-    std::cerr << "Usage: " << argv[0] << " <filename>" << std::endl;
-    return 1; // Indicate an error
+
+  for (const auto &entry : std::filesystem::directory_iterator(ROM_PATH)) {
+    roms.push_back(entry.path().filename());
   }
-
-  std::ifstream rom_file(argv[1], std::ios::binary | std::ios::in);
-
-  if (!rom_file.is_open()) {
-    std::printf("no rom found. \n");
+  for (auto a : roms) {
+    std::cout << a << "\n";
   }
-
-  auto rom = Rom::from_file(rom_file).value();
 
   Chip8 chip{};
-  chip.load_rom(rom);
 
   SDL_Window *window;
   SDL_Renderer *renderer;
@@ -464,12 +491,12 @@ int main(int argc, char *argv[]) {
     return 3;
   }
 
-
   /* SDL_SetRenderVSync(renderer, 1); */
 
   /* SDL_SetRenderLogicalPresentation( */
   /*     renderer, SCREEN_WIDTH, SCREEN_HEIGHT, */
-  /*     SDL_RendererLogicalPresentation::SDL_LOGICAL_PRESENTATION_INTEGER_SCALE); */
+  /*     SDL_RendererLogicalPresentation::SDL_LOGICAL_PRESENTATION_INTEGER_SCALE);
+   */
 
   SDL_AudioSpec spec = {
       .format = SDL_AUDIO_F32,
@@ -497,7 +524,7 @@ int main(int argc, char *argv[]) {
   uint frame = 0;
   while (true) {
     SDL_PollEvent(&event);
-    
+
     ImGui_ImplSDL3_ProcessEvent(&event);
 
     switch (event.type) {
@@ -580,43 +607,42 @@ int main(int argc, char *argv[]) {
       break;
     }
 
-    auto r = chip.run_cycle();
+    if (rom_loaded) {
+      auto r = chip.run_cycle();
 
-    if (!r) {
-      handle_chip_error(r.error());
-      break;
-    }
-
-    if (*r)
-      break;
-
-    if (chip.delay_timer > 0) {
-      chip.delay_timer -= 1;
-    }
-
-    if (chip.sound_timer > 0) {
-      if (!playing_sound) {
-        SDL_ResumeAudioStreamDevice(audio);
-        playing_sound = true;
+      if (!r) {
+        handle_chip_error(r.error());
+        break;
       }
 
-      chip.delay_timer -= 1;
+      /* if (*r) */
+      /*   break; */
 
-      if (SDL_GetAudioStreamQueued(audio) < spec.freq * sizeof(float) / 10) {
-        SDL_PutAudioStreamData(audio, audio_buffer.data(),
-                               audio_buffer.size() * sizeof(float));
+      if (chip.delay_timer > 0) {
+        chip.delay_timer -= 1;
       }
 
-    } else {
-      if (playing_sound) {
-        SDL_PauseAudioStreamDevice(audio);
-        SDL_ClearAudioStream(audio);
-        playing_sound = false;
+      if (chip.sound_timer > 0) {
+        if (!playing_sound) {
+          SDL_ResumeAudioStreamDevice(audio);
+          playing_sound = true;
+        }
+
+        chip.delay_timer -= 1;
+
+        if (SDL_GetAudioStreamQueued(audio) < spec.freq * sizeof(float) / 10) {
+          SDL_PutAudioStreamData(audio, audio_buffer.data(),
+                                 audio_buffer.size() * sizeof(float));
+        }
+
+      } else {
+        if (playing_sound) {
+          SDL_PauseAudioStreamDevice(audio);
+          SDL_ClearAudioStream(audio);
+          playing_sound = false;
+        }
       }
     }
-
-    /* system("clear"); */
-    /* chip.print_screen(); */
 
     SDL_SetRenderDrawColor(renderer, 0x00, 0x00, 0x00, 0x00);
     SDL_RenderClear(renderer);
@@ -627,7 +653,8 @@ int main(int argc, char *argv[]) {
     ImGui_ImplSDLRenderer3_NewFrame();
     ImGui::NewFrame();
 
-    ImGui::ShowDemoWindow();
+    draw_emulator_ui(chip);
+
     ImGui::Render();
 
     ImGui_ImplSDLRenderer3_RenderDrawData(ImGui::GetDrawData(), renderer);
