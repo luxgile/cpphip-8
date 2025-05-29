@@ -315,6 +315,7 @@ struct Chip8 {
       u_int8_t vy = regs[(inst & 0x00F0) >> 4];
       u_int8_t n = inst & 0x000F;
 
+      vf = 0;
       for (int i = 0; i < n; i++) {
         u_int8_t sprite = memory[reg_i + i];
         int y = (vy + i) % SCREEN_HEIGHT;
@@ -397,7 +398,7 @@ struct Chip8 {
         for (int i = 0; i <= x; i++) {
           memory[reg_i + i] = regs[i];
         }
-        reg_i += x + 1;
+        /* reg_i += x + 1; */
       }
 
       if ((inst & 0x00FF) == 0x0065) {
@@ -405,7 +406,7 @@ struct Chip8 {
         for (int i = 0; i <= x; i++) {
           regs[i] = memory[reg_i + i];
         }
-        reg_i += x + 1;
+        /* reg_i += x + 1; */
       }
 
       break;
@@ -440,7 +441,7 @@ void handle_chip_error(ChipError &error) {
 #define ROM_PATH "roms/"
 std::vector<std::string> roms{};
 bool rom_loaded = false;
-int cycles_per_second = 60;
+int cycles_per_second = 500;
 void draw_emulator_ui(Chip8 &chip) {
   ImGui::Begin("Chip 8");
 
